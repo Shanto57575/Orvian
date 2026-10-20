@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    name: Backend Lint, Typecheck & Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Install dependencies (frozen lockfile)
+        run: uv sync --frozen --extra dev
+
+      - name: Run Ruff Lint
+        run: uv run ruff check .
+
+      - name: Check Ruff Formatting
+        run: uv run ruff format --check .
+
+      - name: Run Mypy Typecheck
+        run: uv run mypy app tests
+
+      - name: Run Pytest Tests
+        run: uv run pytest
+
+  frontend:
+    name: Frontend Lint, Typecheck, Test & Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.26.2
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "pnpm"
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install dependencies (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Run ESLint
+        run: pnpm run lint
+
+      - name: Check Prettier Formatting
+        run: pnpm run format:check
+
+      - name: Run TypeScript Typecheck
+        run: pnpm run typecheck
+
+      - name: Run Vitest Unit Tests
+        run: pnpm run test
+
+      - name: Build Frontend Application
+        run: pnpm run build

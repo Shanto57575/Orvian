@@ -1,0 +1,97 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
+
+# Python packaging & distribution
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# uv & Virtual environments (keep uv.lock tracked!)
+.venv/
+venv/
+ENV/
+env/
+!uv.lock
+!backend/uv.lock
+
+# Python Quality & Testing Caches
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+
+# Node.js & pnpm (keep pnpm-lock.yaml tracked!)
+node_modules/
+.pnpm-store/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+!pnpm-lock.yaml
+!frontend/pnpm-lock.yaml
+
+# Frontend Build & Caches
+frontend/dist/
+dist/
+.next/
+out/
+.turbo/
+.vite/
+.parcel-cache/
+
+# Test & Browser artifacts
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# Databases & local storage
+*.db
+*.sqlite
+*.sqlite3
+postgres-data/
+
+# Logs
+logs/
+*.log
+
+# OS & IDE artifacts
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+*.swp
+*~
+*.bak
