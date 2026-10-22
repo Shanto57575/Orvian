@@ -1,18 +1,20 @@
-"""Application configuration loaded exclusively from root .env using Pydantic Settings."""
+"""Application configuration loaded from backend/.env using Pydantic Settings."""
 
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 from urllib.parse import parse_qs, urlparse
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# Canonical repository root is the parent of the backend directory.
-# The repository root .env file is the ONLY configuration file loaded by the application.
+# Canonical backend directory and environment configuration file.
+# The backend/.env file is the configuration file loaded by the backend service.
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 REPO_ROOT = BACKEND_DIR.parent
-CANONICAL_ENV_FILE = REPO_ROOT / ".env"
+CANONICAL_ENV_FILE = BACKEND_DIR / ".env"
+
+DEFAULT_DEV_SECRET = "development-insecure-secret-key-32-bytes-minimum-length!"
 
 
 def escape_alembic_url(url: str) -> str:
@@ -65,7 +67,7 @@ class Settings(BaseSettings):
     """Orvian application settings."""
 
     model_config = SettingsConfigDict(
-        # The repository root .env file is the ONLY canonical environment file.
+        # The backend/.env file is the canonical environment file.
         env_file=str(CANONICAL_ENV_FILE),
         env_file_encoding="utf-8",
         extra="ignore",
@@ -98,31 +100,41 @@ class Settings(BaseSettings):
     DB_POOL_PRE_PING: bool = True
     DB_POOL_TIMEOUT: int = 30
 
-    # Authentication & Session Security (Planned for Post-Setup)
+    # Authentication & Session Security
     AUTH_SECRET_KEY: str = Field(
-        default="development-insecure-secret-key-32-bytes-minimum-length!",
+        default=DEFAULT_DEV_SECRET,
         description="Secret key for signing sessions and tokens.",
     )
     AUTH_TOKEN_EXPIRE_MINUTES: int = 60
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
+    EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS: int = 24
+    EMAIL_VERIFICATION_OTP_EXPIRE_MINUTES: int = 15
+    MAX_OTP_ATTEMPTS: int = 5
+    RESEND_COOLDOWN_SECONDS: int = 60
+    PASSWORD_RESET_TOKEN_EXPIRE_MINUTES: int = 15
+
+    # Session & CSRF Cookies
     SESSION_COOKIE_NAME: str = "orvian_session"
     SESSION_COOKIE_SECURE: bool = False
     SESSION_COOKIE_SAMESITE: Literal["lax", "strict", "none"] = "lax"
+    CSRF_COOKIE_NAME: str = "orvian_csrf"
 
-    # Google OAuth (Planned for Post-Setup)
+    # Google OAuth
     GOOGLE_OAUTH_CLIENT_ID: str | None = None
     GOOGLE_OAUTH_CLIENT_SECRET: str | None = None
     GOOGLE_OAUTH_REDIRECT_URI: str = "http://localhost:8000/api/v1/auth/google/callback"
 
-    # SMTP Configuration (Planned for Post-Setup)
+    # SMTP & Resend Email Configuration
+    RESEND_API_KEY: str | None = None
     SMTP_HOST: str | None = None
     SMTP_PORT: int = 587
+    SMTP_TIMEOUT_SECONDS: float = 10.0
     SMTP_USER: str | None = None
     SMTP_PASSWORD: str | None = None
     SMTP_FROM_EMAIL: str = "noreply@orvian.local"
     SMTP_FROM_NAME: str = "Orvian Assistant"
 
-    # AI Configuration (Planned for Post-Setup)
+    # AI Configuration (Planned for Post-Auth)
     OPENAI_API_KEY: str | None = None
     EMBEDDING_MODEL: str = "text-embedding-3-small"
     LLM_MODEL: str = "gpt-4o-mini"
@@ -139,6 +151,19 @@ class Settings(BaseSettings):
         if v is None:
             return None
         return validate_neon_ssl_mode(v, "DIRECT_DATABASE_URL", is_direct=True)
+
+    @model_validator(mode="after")
+    def validate_production_security(self) -> "Settings":
+        """Enforce strict production security: no default secrets, secure cookies, SMTP."""
+        if self.ENVIRONMENT == "production":
+            if self.AUTH_SECRET_KEY == DEFAULT_DEV_SECRET or len(self.AUTH_SECRET_KEY) < 32:
+                raise ValueError(
+                    "Production requires a custom AUTH_SECRET_KEY with at least 32 characters."
+                )
+            if not self.SESSION_COOKIE_SECURE:
+                # Force secure cookies in production
+                object.__setattr__(self, "SESSION_COOKIE_SECURE", True)
+        return self
 
     @property
     def migration_database_url(self) -> str:

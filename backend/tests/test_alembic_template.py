@@ -18,6 +18,7 @@ def _comma_filter(val: Any) -> str:
 def test_alembic_template_renders_and_passes_ruff(tmp_path: Path) -> None:
     """Verify that a migration rendered from script.py.mako passes both Ruff check and format."""
     template_path = Path(__file__).resolve().parent.parent / "alembic" / "script.py.mako"
+    pyproject_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
     template = Template(filename=str(template_path))
     rendered = template.render(
         message="Initial test migration",
@@ -35,9 +36,17 @@ def test_alembic_template_renders_and_passes_ruff(tmp_path: Path) -> None:
     migration_file = tmp_path / "test_migration.py"
     migration_file.write_text(rendered, encoding="utf-8")
 
-    # 1. Run Ruff check on the rendered migration file
+    # 1. Run Ruff check on the rendered migration file using pyproject.toml
     check_result = subprocess.run(
-        [sys.executable, "-m", "ruff", "check", str(migration_file)],
+        [
+            sys.executable,
+            "-m",
+            "ruff",
+            "check",
+            "--config",
+            str(pyproject_path),
+            str(migration_file),
+        ],
         capture_output=True,
         text=True,
         check=False,
@@ -47,7 +56,16 @@ def test_alembic_template_renders_and_passes_ruff(tmp_path: Path) -> None:
 
     # 2. Run Ruff format --check on the rendered migration file
     format_result = subprocess.run(
-        [sys.executable, "-m", "ruff", "format", "--check", str(migration_file)],
+        [
+            sys.executable,
+            "-m",
+            "ruff",
+            "format",
+            "--config",
+            str(pyproject_path),
+            "--check",
+            str(migration_file),
+        ],
         capture_output=True,
         text=True,
         check=False,
@@ -59,6 +77,7 @@ def test_alembic_template_renders_and_passes_ruff(tmp_path: Path) -> None:
 def test_alembic_template_renders_and_passes_ruff_with_previous_revision(tmp_path: Path) -> None:
     """Verify that a migration with down_revision passes both Ruff check and format."""
     template_path = Path(__file__).resolve().parent.parent / "alembic" / "script.py.mako"
+    pyproject_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
     template = Template(filename=str(template_path))
     rendered = template.render(
         message="Add user table",
@@ -82,9 +101,17 @@ def test_alembic_template_renders_and_passes_ruff_with_previous_revision(tmp_pat
     migration_file = tmp_path / "test_migration_2.py"
     migration_file.write_text(rendered, encoding="utf-8")
 
-    # 1. Run Ruff check
+    # 1. Run Ruff check using backend configuration
     check_result = subprocess.run(
-        [sys.executable, "-m", "ruff", "check", str(migration_file)],
+        [
+            sys.executable,
+            "-m",
+            "ruff",
+            "check",
+            "--config",
+            str(pyproject_path),
+            str(migration_file),
+        ],
         capture_output=True,
         text=True,
         check=False,
@@ -94,7 +121,16 @@ def test_alembic_template_renders_and_passes_ruff_with_previous_revision(tmp_pat
 
     # 2. Run Ruff format --check
     format_result = subprocess.run(
-        [sys.executable, "-m", "ruff", "format", "--check", str(migration_file)],
+        [
+            sys.executable,
+            "-m",
+            "ruff",
+            "format",
+            "--config",
+            str(pyproject_path),
+            "--check",
+            str(migration_file),
+        ],
         capture_output=True,
         text=True,
         check=False,

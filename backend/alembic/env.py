@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 # Register pgvector with SQLAlchemy / Alembic
 import pgvector.sqlalchemy  # noqa: F401
 
+import app.db.models  # noqa: F401
 from app.config import escape_alembic_url, get_settings
 from app.db.session import Base
 

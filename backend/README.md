@@ -12,12 +12,12 @@ FastAPI backend with SQLAlchemy 2, Alembic, psycopg 3, Neon PostgreSQL with pgve
    uv sync --extra dev
    ```
 3. Environment configuration:
-   The backend loads configuration exclusively from the **repository root `.env`** file.
+   The backend loads configuration from the **`backend/.env`** file.
    ```powershell
-   # From the repository root (not backend/):
+   # In the backend directory:
    Copy-Item .env.example .env
    ```
-   Never commit `.env` or create local `backend/.env` files.
+   Never commit `.env` to version control.
 4. Run checks:
    ```powershell
    uv run ruff check .

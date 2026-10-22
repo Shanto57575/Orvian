@@ -11,11 +11,9 @@ Create Date: ${create_date}
 """
 
 from collections.abc import Sequence
+
 % if imports:
-
 ${imports}
-% else:
-
 % endif
 import sqlalchemy as sa  # noqa: F401
 

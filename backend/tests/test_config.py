@@ -3,16 +3,16 @@
 import pytest
 
 from app.config import (
+    BACKEND_DIR,
     CANONICAL_ENV_FILE,
-    REPO_ROOT,
     Settings,
     escape_alembic_url,
 )
 
 
 def test_canonical_env_file_location() -> None:
-    """Verify CANONICAL_ENV_FILE points strictly to repo root .env."""
-    assert CANONICAL_ENV_FILE == REPO_ROOT / ".env"
+    """Verify CANONICAL_ENV_FILE points strictly to backend/.env."""
+    assert CANONICAL_ENV_FILE == BACKEND_DIR / ".env"
     assert CANONICAL_ENV_FILE.name == ".env"
 
 
