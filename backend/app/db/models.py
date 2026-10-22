@@ -1,12 +1,44 @@
-"""SQLAlchemy 2 database models for authentication and sessions."""
+"""SQLAlchemy 2 database models for authentication, sessions, and tenant business data."""
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Uuid
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+    Uuid,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
+
+
+def _utcnow() -> datetime:
+    return datetime.now(UTC)
+
+
+class Account(Base):
+    """Tenant boundary. Every business record belongs to exactly one account."""
+
+    __tablename__ = "accounts"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    slug: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    is_demo: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
 
 
 class User(Base):
@@ -32,6 +64,13 @@ class User(Base):
     )
     otp_last_sent_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+    # Tenant membership: one account per user for now. NULL means no business data access.
+    account_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("accounts.id", ondelete="SET NULL", name="fk_users_account_id"),
+        nullable=True,
+        index=True,
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -144,3 +183,116 @@ class EmailOutbox(Base):
         nullable=False,
     )
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+# ====================================================================
+# Tenant business data (synthetic demo data only)
+# ====================================================================
+INVOICE_STATUSES = ("open", "paid", "void")
+PAYMENT_METHODS = ("bank_transfer", "card", "ach", "check")
+
+
+class Customer(Base):
+    """Synthetic customer record owned by an account."""
+
+    __tablename__ = "customers"
+    __table_args__ = (
+        UniqueConstraint("account_id", "external_ref", name="uq_customers_account_ref"),
+        # Target for composite tenant-safe foreign keys from invoices.
+        UniqueConstraint("account_id", "id", name="uq_customers_account_id_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    account_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("accounts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    external_ref: Mapped[str] = mapped_column(String(32), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    industry: Mapped[str] = mapped_column(String(100), nullable=False)
+    country: Mapped[str] = mapped_column(String(2), nullable=False)
+    segment: Mapped[str] = mapped_column(String(20), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+
+
+class Invoice(Base):
+    """Synthetic invoice. Monetary amounts are integer minor units (cents)."""
+
+    __tablename__ = "invoices"
+    __table_args__ = (
+        UniqueConstraint("account_id", "invoice_number", name="uq_invoices_account_number"),
+        UniqueConstraint("account_id", "id", name="uq_invoices_account_id_id"),
+        ForeignKeyConstraint(
+            ["account_id", "customer_id"],
+            ["customers.account_id", "customers.id"],
+            name="fk_invoices_account_customer",
+            ondelete="CASCADE",
+        ),
+        CheckConstraint("subtotal_cents >= 0", name="ck_invoices_subtotal_nonneg"),
+        CheckConstraint("tax_cents >= 0", name="ck_invoices_tax_nonneg"),
+        CheckConstraint("total_cents = subtotal_cents + tax_cents", name="ck_invoices_total"),
+        CheckConstraint("due_date >= issue_date", name="ck_invoices_due_after_issue"),
+        CheckConstraint("status IN ('open', 'paid', 'void')", name="ck_invoices_status"),
+        CheckConstraint("length(currency) = 3", name="ck_invoices_currency"),
+        Index("ix_invoices_account_issue_date", "account_id", "issue_date"),
+        Index("ix_invoices_account_status_due", "account_id", "status", "due_date"),
+        Index("ix_invoices_account_customer", "account_id", "customer_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    account_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("accounts.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    customer_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    invoice_number: Mapped[str] = mapped_column(String(32), nullable=False)
+    issue_date: Mapped[date] = mapped_column(Date, nullable=False)
+    due_date: Mapped[date] = mapped_column(Date, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    subtotal_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    tax_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    total_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    status: Mapped[str] = mapped_column(String(10), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+
+
+class Payment(Base):
+    """Synthetic payment applied to a single invoice. Amount in integer cents."""
+
+    __tablename__ = "payments"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["account_id", "invoice_id"],
+            ["invoices.account_id", "invoices.id"],
+            name="fk_payments_account_invoice",
+            ondelete="CASCADE",
+        ),
+        CheckConstraint("amount_cents > 0", name="ck_payments_amount_positive"),
+        CheckConstraint(
+            "method IN ('bank_transfer', 'card', 'ach', 'check')", name="ck_payments_method"
+        ),
+        Index("ix_payments_account_paid_on", "account_id", "paid_on"),
+        Index("ix_payments_account_invoice", "account_id", "invoice_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    account_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("accounts.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    invoice_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    amount_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    paid_on: Mapped[date] = mapped_column(Date, nullable=False)
+    method: Mapped[str] = mapped_column(String(20), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )

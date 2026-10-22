@@ -134,11 +134,16 @@ class Settings(BaseSettings):
     SMTP_FROM_EMAIL: str = "noreply@orvian.local"
     SMTP_FROM_NAME: str = "Orvian Assistant"
 
-    # AI Configuration (Planned for Post-Auth)
+    # AI Configuration
     OPENAI_API_KEY: str | None = None
     EMBEDDING_MODEL: str = "text-embedding-3-small"
     LLM_MODEL: str = "gpt-4o-mini"
     LLM_TIMEOUT_SECONDS: int = 30
+    LLM_MAX_RETRIES: int = Field(default=2, ge=0, le=5)
+    LLM_MAX_TOOL_ITERATIONS: int = Field(default=4, ge=1, le=8)
+    LLM_MAX_TOOL_CALLS: int = Field(default=8, ge=1, le=20)
+    LLM_MAX_OUTPUT_TOKENS: int = Field(default=800, ge=64, le=4000)
+    CHAT_RATE_LIMIT: str = "10/minute"
 
     @field_validator("DATABASE_URL")
     @classmethod
