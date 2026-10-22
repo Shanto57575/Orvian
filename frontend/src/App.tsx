@@ -22,6 +22,7 @@ import { ResetPasswordModal } from './components/auth/ResetPasswordModal'
 import { VerifyEmailNotice } from './components/auth/VerifyEmailNotice'
 import { UserMenu } from './components/auth/UserMenu'
 import { ProtectedDemoCard } from './components/auth/ProtectedDemoCard'
+import { ChatCard } from './components/chat/ChatCard'
 
 interface HealthResponse {
   status: string
@@ -134,7 +135,7 @@ function MainContent() {
               Orvian
             </span>
             <span className="text-[11px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-semibold border border-blue-200">
-              Auth Ready
+              AI Analyst Active
             </span>
           </div>
 
@@ -259,6 +260,19 @@ function MainContent() {
           </div>
         </div>
 
+        {/* AI Operations Analyst Workspace */}
+        <section aria-label="AI Operations Analyst" className="w-full">
+          <ChatCard
+            onOpenAuth={() => setAuthView('login')}
+            onOpenOtp={() => {
+              if (user?.email) {
+                setOtpEmail(user.email)
+                setAuthView('otp')
+              }
+            }}
+          />
+        </section>
+
         {/* Live Backend Permission Test */}
         <div className="w-full">
           <ProtectedDemoCard onOpenAuth={() => setAuthView('login')} />
@@ -328,14 +342,22 @@ function MainContent() {
             const cleanUrl = new URL(window.location.href)
             cleanUrl.searchParams.delete('token')
             cleanUrl.searchParams.delete('reset_token')
-            window.history.replaceState({}, '', cleanUrl.search ? cleanUrl.pathname + cleanUrl.search : '/')
+            window.history.replaceState(
+              {},
+              '',
+              cleanUrl.search ? cleanUrl.pathname + cleanUrl.search : '/',
+            )
           }}
           onSuccess={() => {
             setResetToken(null)
             const cleanUrl = new URL(window.location.href)
             cleanUrl.searchParams.delete('token')
             cleanUrl.searchParams.delete('reset_token')
-            window.history.replaceState({}, '', cleanUrl.search ? cleanUrl.pathname + cleanUrl.search : '/')
+            window.history.replaceState(
+              {},
+              '',
+              cleanUrl.search ? cleanUrl.pathname + cleanUrl.search : '/',
+            )
             setAuthView('login')
           }}
         />

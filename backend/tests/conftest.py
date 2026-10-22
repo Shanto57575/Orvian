@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.pool import StaticPool
 
 from app.auth.email import set_outbox_session_factory, wait_outbox_delivery
-from app.db.session import Base, get_db_session
+from app.db.session import Base, get_db_session, get_read_only_db_session
 from app.main import app
 
 # Disable slowapi rate limiting during tests
@@ -68,6 +68,8 @@ async def override_get_db_session() -> AsyncGenerator[AsyncSession, None]:
 
 
 app.dependency_overrides[get_db_session] = override_get_db_session
+# AI business queries use a separate READ ONLY session in production; SQLite in tests.
+app.dependency_overrides[get_read_only_db_session] = override_get_db_session
 
 
 @pytest_asyncio.fixture

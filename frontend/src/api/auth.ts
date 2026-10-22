@@ -6,13 +6,13 @@ import type {
   UserSessionInfo,
 } from '../types/auth'
 
-function getCsrfToken(): string | null {
+export function getCsrfToken(): string | null {
   if (typeof document === 'undefined') return null
   const match = document.cookie.match(/(?:^|;\s*)orvian_csrf=([^;]+)/)
   return match?.[1] ? decodeURIComponent(match[1]) : null
 }
 
-async function apiRequest<T>(
+export async function apiRequest<T>(
   endpoint: string,
   options: RequestInit = {},
 ): Promise<T> {
@@ -46,7 +46,14 @@ async function apiRequest<T>(
   if (!response.ok) {
     let errorMessage = `Request failed with status ${response.status}`
     if (data && typeof data === 'object' && 'detail' in data) {
-      errorMessage = String((data as { detail: unknown }).detail)
+      const detail = (data as { detail: unknown }).detail
+      if (typeof detail === 'string') {
+        errorMessage = detail
+      } else if (typeof detail === 'object' && detail !== null) {
+        errorMessage = JSON.stringify(detail)
+      } else {
+        errorMessage = String(detail)
+      }
     }
     throw new Error(errorMessage)
   }

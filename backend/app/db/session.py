@@ -3,7 +3,7 @@
 from collections.abc import AsyncGenerator
 from typing import Any
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -51,6 +51,29 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
         except Exception:
             await session.rollback()
             raise
+
+
+async def set_transaction_read_only(session: AsyncSession) -> None:
+    """Mark the current PostgreSQL transaction READ ONLY (must be its first statement).
+
+    SQLite (used in unit tests) has no equivalent; callers stay read-only by construction.
+    """
+    if session.get_bind().dialect.name == "postgresql":
+        await session.execute(text("SET TRANSACTION READ ONLY"))
+
+
+async def get_read_only_db_session() -> AsyncGenerator[AsyncSession, None]:
+    """FastAPI dependency yielding a separate session whose transaction is READ ONLY.
+
+    Used for AI-driven business queries: even a bug in a query builder cannot write data.
+    The transaction is always rolled back; nothing is ever committed.
+    """
+    async with AsyncSessionLocal() as session:
+        try:
+            await set_transaction_read_only(session)
+            yield session
+        finally:
+            await session.rollback()
 
 
 # Sync engine for Alembic migrations and administrative CLI tasks

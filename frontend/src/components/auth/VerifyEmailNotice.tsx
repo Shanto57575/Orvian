@@ -55,8 +55,7 @@ export function VerifyEmailNotice({ onOpenOtp }: VerifyEmailNoticeProps = {}) {
         }
       } catch (err) {
         if (isMounted) {
-          const msg =
-            err instanceof Error ? err.message : 'Verification failed'
+          const msg = err instanceof Error ? err.message : 'Verification failed'
           // If already verified, treat gracefully as verified!
           if (msg.toLowerCase().includes('already verified')) {
             setVerificationSuccess(true)
