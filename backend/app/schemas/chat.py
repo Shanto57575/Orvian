@@ -20,6 +20,19 @@ class ToolCallTrace(BaseModel):
     error_code: str | None = None
 
 
+class DocumentCitation(BaseModel):
+    citation_id: str
+    doc_key: str
+    document_title: str
+    category: str
+    version: str
+    effective_date: date
+    section_title: str
+    page_number: int
+    similarity_score: float
+    excerpt: str
+
+
 class ChatUsage(BaseModel):
     model: str
     input_tokens: int
@@ -31,5 +44,6 @@ class ChatResponse(BaseModel):
     status: Literal["ok", "no_data", "limit_reached", "ungrounded"]
     as_of: date
     tool_calls: list[ToolCallTrace] = []
+    citations: list[DocumentCitation] = []
     usage: ChatUsage | None = None
     correlation_id: str

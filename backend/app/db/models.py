@@ -2,8 +2,11 @@
 
 import uuid
 from datetime import UTC, date, datetime
+from typing import Any
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Boolean,
     CheckConstraint,
@@ -14,6 +17,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Text,
     UniqueConstraint,
     Uuid,
 )
@@ -295,4 +299,108 @@ class Payment(Base):
     method: Mapped[str] = mapped_column(String(20), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+
+
+# ====================================================================
+# Tenant policy documents & RAG vector chunks
+# ====================================================================
+POLICY_CATEGORIES = (
+    "payment_terms",
+    "collections",
+    "refunds",
+    "credit_policy",
+    "operating_procedures",
+)
+EMBEDDING_VECTOR_DIM = 1536
+_EMBEDDING_COLUMN_TYPE = Vector(EMBEDDING_VECTOR_DIM).with_variant(JSON(), "sqlite")
+
+
+class PolicyDocument(Base):
+    """Account-scoped fictional company policy document."""
+
+    __tablename__ = "policy_documents"
+    __table_args__ = (
+        UniqueConstraint("account_id", "doc_key", name="uq_policy_docs_account_key"),
+        # Target for composite tenant-safe foreign keys from document_chunks.
+        UniqueConstraint("account_id", "id", name="uq_policy_docs_account_id_id"),
+        CheckConstraint(
+            "category IN ('payment_terms', 'collections', 'refunds', "
+            "'credit_policy', 'operating_procedures')",
+            name="ck_policy_docs_category",
+        ),
+        Index("ix_policy_docs_account_category", "account_id", "category"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    account_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("accounts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    doc_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    category: Mapped[str] = mapped_column(String(50), nullable=False)
+    version: Mapped[str] = mapped_column(String(20), nullable=False)
+    effective_date: Mapped[date] = mapped_column(Date, nullable=False)
+    filename: Mapped[str] = mapped_column(String(120), nullable=False)
+    checksum_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+
+    chunks: Mapped[list["DocumentChunk"]] = relationship(
+        "DocumentChunk",
+        back_populates="document",
+        cascade="all, delete-orphan",
+        primaryjoin="and_(PolicyDocument.id == DocumentChunk.document_id, "
+        "PolicyDocument.account_id == DocumentChunk.account_id)",
+        foreign_keys="[DocumentChunk.document_id, DocumentChunk.account_id]",
+    )
+
+
+class DocumentChunk(Base):
+    """Account-scoped chunk of a policy document with pgvector embedding."""
+
+    __tablename__ = "document_chunks"
+    __table_args__ = (
+        UniqueConstraint("account_id", "chunk_id", name="uq_doc_chunks_account_chunk_id"),
+        UniqueConstraint("document_id", "chunk_index", name="uq_doc_chunks_doc_idx"),
+        ForeignKeyConstraint(
+            ["account_id", "document_id"],
+            ["policy_documents.account_id", "policy_documents.id"],
+            name="fk_doc_chunks_account_document",
+            ondelete="CASCADE",
+        ),
+        CheckConstraint("chunk_index >= 0", name="ck_doc_chunks_index_nonneg"),
+        CheckConstraint("page_number >= 1", name="ck_doc_chunks_page_pos"),
+        CheckConstraint("token_count > 0", name="ck_doc_chunks_tokens_pos"),
+        Index("ix_doc_chunks_account_doc", "account_id", "document_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    account_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("accounts.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    document_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    chunk_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    section_title: Mapped[str] = mapped_column(String(200), nullable=False)
+    page_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    token_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    embedding: Mapped[Any] = mapped_column(_EMBEDDING_COLUMN_TYPE, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+
+    document: Mapped["PolicyDocument"] = relationship(
+        "PolicyDocument",
+        back_populates="chunks",
+        primaryjoin="and_(DocumentChunk.document_id == PolicyDocument.id, "
+        "DocumentChunk.account_id == PolicyDocument.account_id)",
+        foreign_keys="[DocumentChunk.document_id, DocumentChunk.account_id]",
     )

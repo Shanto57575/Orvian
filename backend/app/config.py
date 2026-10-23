@@ -137,12 +137,16 @@ class Settings(BaseSettings):
     # AI Configuration
     OPENAI_API_KEY: str | None = None
     EMBEDDING_MODEL: str = "text-embedding-3-small"
+    EMBEDDING_DIMENSIONS: int = Field(default=1536, ge=256, le=3072)
+    RAG_TOP_K: int = Field(default=5, ge=1, le=8)
+    RAG_MAX_COSINE_DISTANCE: float = Field(default=0.58, ge=0.05, le=1.5)
     LLM_MODEL: str = "gpt-4o-mini"
     LLM_TIMEOUT_SECONDS: int = 30
     LLM_MAX_RETRIES: int = Field(default=2, ge=0, le=5)
-    LLM_MAX_TOOL_ITERATIONS: int = Field(default=4, ge=1, le=8)
+    LLM_MAX_TOOL_ITERATIONS: int = Field(default=5, ge=1, le=8)
     LLM_MAX_TOOL_CALLS: int = Field(default=8, ge=1, le=20)
     LLM_MAX_OUTPUT_TOKENS: int = Field(default=800, ge=64, le=4000)
+    LLM_MAX_INPUT_TOKENS_PER_REQUEST: int = Field(default=16000, ge=1000, le=64000)
     CHAT_RATE_LIMIT: str = "10/minute"
 
     @field_validator("DATABASE_URL")
