@@ -1,10 +1,11 @@
-"""Strict allowlist of AI-callable business tools.
+"""Strict allowlist of AI-callable business and document retrieval tools.
 
 Each tool is a fixed mapping from a name to (a) a Pydantic argument model that forbids
-unknown fields and bounds every value, and (b) a call into ``BusinessDataService``.
+unknown fields and bounds every value, and (b) a call into ``BusinessDataService`` or
+``DocumentRetrievalService``.
 
 There is deliberately no tool that accepts SQL, column names, sort expressions or an
-``account_id``. Tenant scope comes only from the authenticated user via the service.
+``account_id``. Tenant scope comes only from the authenticated user via the services.
 """
 
 import json
@@ -18,6 +19,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.ai.embeddings import EmbeddingError
 from app.business.service import (
     MAX_RANGE_DAYS,
     MAX_SEARCH_LIMIT,
@@ -25,6 +27,13 @@ from app.business.service import (
     MAX_UNPAID_LIMIT,
     BusinessDataService,
     BusinessQueryError,
+)
+from app.documents.schemas import PolicyCategory
+from app.documents.service import (
+    MAX_QUERY_LENGTH,
+    MAX_TOP_K,
+    DocumentQueryError,
+    DocumentRetrievalService,
 )
 
 logger = logging.getLogger(__name__)
@@ -34,6 +43,23 @@ MONTH_PATTERN = r"^\d{4}-(0[1-9]|1[0-2])$"
 MAX_RAW_ARGUMENT_BYTES = 4096
 _MIN_DATE = date(2000, 1, 1)
 _MAX_DATE = date(2100, 12, 31)
+
+SQL_BUSINESS_TOOLS: frozenset[str] = frozenset(
+    {
+        "get_revenue_summary",
+        "list_unpaid_invoices",
+        "get_customer_summary",
+        "search_customers",
+        "get_monthly_trend",
+    }
+)
+DOCUMENT_RAG_TOOLS: frozenset[str] = frozenset({"search_policy_documents"})
+
+
+@dataclass(frozen=True)
+class ToolContext:
+    business: BusinessDataService
+    documents: DocumentRetrievalService | None = None
 
 
 class _ToolArgs(BaseModel):
@@ -103,13 +129,33 @@ class MonthlyTrendArgs(_ToolArgs):
     )
 
 
+class SearchPolicyDocumentsArgs(_ToolArgs):
+    query: str = Field(
+        min_length=2,
+        max_length=MAX_QUERY_LENGTH,
+        description="Natural-language search query for company policies, terms, credit limits, "
+        "collections escalation tiers, refunds, or operating procedures.",
+    )
+    category: PolicyCategory | None = Field(
+        default=None,
+        description="Optional policy category filter ('payment_terms', 'collections', 'refunds', "
+        "'credit_policy', 'operating_procedures'), or null to search all categories.",
+    )
+    top_k: int = Field(
+        default=4,
+        ge=1,
+        le=MAX_TOP_K,
+        description="Maximum number of relevant policy chunks to retrieve (1-8).",
+    )
+
+
 def _expect[T: BaseModel](args: BaseModel, model: type[T]) -> T:
     if not isinstance(args, model):
         raise TypeError(f"expected {model.__name__}")
     return args
 
 
-ToolHandler = Callable[[BusinessDataService, BaseModel], Awaitable[BaseModel]]
+ToolHandler = Callable[[ToolContext, BaseModel], Awaitable[BaseModel]]
 
 
 @dataclass(frozen=True)
@@ -120,14 +166,14 @@ class ToolSpec:
     handler: ToolHandler
 
 
-async def _revenue(service: BusinessDataService, raw: BaseModel) -> BaseModel:
+async def _revenue(ctx: ToolContext, raw: BaseModel) -> BaseModel:
     args = _expect(raw, RevenueSummaryArgs)
-    return await service.revenue_summary(args.start_date, args.end_date)
+    return await ctx.business.revenue_summary(args.start_date, args.end_date)
 
 
-async def _unpaid(service: BusinessDataService, raw: BaseModel) -> BaseModel:
+async def _unpaid(ctx: ToolContext, raw: BaseModel) -> BaseModel:
     args = _expect(raw, UnpaidInvoicesArgs)
-    return await service.unpaid_invoices(
+    return await ctx.business.unpaid_invoices(
         overdue_only=args.overdue_only,
         min_days_overdue=args.min_days_overdue,
         customer_ref=args.customer_ref,
@@ -135,23 +181,34 @@ async def _unpaid(service: BusinessDataService, raw: BaseModel) -> BaseModel:
     )
 
 
-async def _customer(service: BusinessDataService, raw: BaseModel) -> BaseModel:
+async def _customer(ctx: ToolContext, raw: BaseModel) -> BaseModel:
     args = _expect(raw, CustomerSummaryArgs)
-    return await service.customer_summary(args.customer_ref)
+    return await ctx.business.customer_summary(args.customer_ref)
 
 
-async def _search(service: BusinessDataService, raw: BaseModel) -> BaseModel:
+async def _search(ctx: ToolContext, raw: BaseModel) -> BaseModel:
     args = _expect(raw, SearchCustomersArgs)
-    return await service.search_customers(args.query, args.limit)
+    return await ctx.business.search_customers(args.query, args.limit)
 
 
-async def _trend(service: BusinessDataService, raw: BaseModel) -> BaseModel:
+async def _trend(ctx: ToolContext, raw: BaseModel) -> BaseModel:
     args = _expect(raw, MonthlyTrendArgs)
     end_month: date | None = None
     if args.end_month:
         year, month = (int(part) for part in args.end_month.split("-"))
         end_month = date(year, month, 1)
-    return await service.monthly_trend(args.months, end_month)
+    return await ctx.business.monthly_trend(args.months, end_month)
+
+
+async def _search_policies(ctx: ToolContext, raw: BaseModel) -> BaseModel:
+    args = _expect(raw, SearchPolicyDocumentsArgs)
+    if ctx.documents is None:
+        raise DocumentQueryError("Policy document retrieval is not configured for this session.")
+    return await ctx.documents.search_documents(
+        args.query,
+        category=args.category,
+        top_k=args.top_k,
+    )
 
 
 TOOLS: Mapping[str, ToolSpec] = MappingProxyType(
@@ -191,6 +248,15 @@ TOOLS: Mapping[str, ToolSpec] = MappingProxyType(
                 "Month-by-month invoiced revenue and collected cash for the last N months.",
                 MonthlyTrendArgs,
                 _trend,
+            ),
+            ToolSpec(
+                "search_policy_documents",
+                "Search official company policy documents and standard operating procedures "
+                "(payment terms, late fees, payment methods, collections escalation tiers, "
+                "credit limits, refunds/disputes, and AR ledger SOPs). Returns verifiable "
+                "excerpts and citation IDs.",
+                SearchPolicyDocumentsArgs,
+                _search_policies,
             ),
         )
     }
@@ -233,7 +299,11 @@ def _describe_validation_error(exc: ValidationError) -> str:
 
 
 async def execute_tool(
-    service: BusinessDataService, name: str, raw_arguments: str
+    service: BusinessDataService,
+    name: str,
+    raw_arguments: str,
+    *,
+    document_service: DocumentRetrievalService | None = None,
 ) -> ToolExecution:
     """Validate and execute a model-requested tool call. Never raises for bad input."""
     spec = TOOLS.get(name)
@@ -255,10 +325,19 @@ async def execute_tool(
         return _failure(name, "invalid_arguments", _describe_validation_error(exc))
 
     arguments = args.model_dump(mode="json")
+    ctx = ToolContext(business=service, documents=document_service)
     try:
-        result = await spec.handler(service, args)
-    except BusinessQueryError as exc:
+        result = await spec.handler(ctx, args)
+    except (BusinessQueryError, DocumentQueryError) as exc:
         return _failure(name, "invalid_arguments", str(exc), arguments)
+    except EmbeddingError as exc:
+        logger.warning("tool.embedding_failed", extra={"tool": name, "error_code": exc.code})
+        return _failure(
+            name,
+            "retrieval_unavailable",
+            "Document search is temporarily unavailable.",
+            arguments,
+        )
     except SQLAlchemyError:
         logger.exception("tool.query_failed", extra={"tool": name})
         return _failure(name, "query_failed", "The data query failed.", arguments)

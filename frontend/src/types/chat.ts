@@ -11,6 +11,19 @@ export interface ToolCallTrace {
   error_code?: string | null
 }
 
+export interface DocumentCitation {
+  citation_id: string
+  doc_key: string
+  document_title: string
+  category: string
+  version: string
+  effective_date: string
+  section_title: string
+  page_number: number
+  similarity_score: number
+  excerpt: string
+}
+
 export interface ChatUsage {
   model: string
   input_tokens: number
@@ -18,13 +31,17 @@ export interface ChatUsage {
 }
 
 export type ChatResponseStatus =
-  'ok' | 'no_data' | 'limit_reached' | 'ungrounded'
+  | 'ok'
+  | 'no_data'
+  | 'limit_reached'
+  | 'ungrounded'
 
 export interface ChatResponse {
   answer: string
   status: ChatResponseStatus
   as_of: string
   tool_calls: ToolCallTrace[]
+  citations?: DocumentCitation[]
   usage?: ChatUsage | null
   correlation_id: string
 }
@@ -46,6 +63,7 @@ export interface ChatMessageItem {
   status?: ChatResponseStatus | 'error'
   as_of?: string
   tool_calls?: ToolCallTrace[]
+  citations?: DocumentCitation[]
   usage?: ChatUsage | null
   correlation_id?: string
   timestamp: string

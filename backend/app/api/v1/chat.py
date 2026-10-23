@@ -9,6 +9,11 @@ from datetime import UTC, date, datetime
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.embeddings import (
+    DeterministicEmbeddingClient,
+    EmbeddingClient,
+    OpenAIEmbeddingClient,
+)
 from app.ai.llm import LLMClient, LLMError, OpenAIChatClient
 from app.ai.orchestrator import NO_ACCOUNT_ANSWER, run_chat
 from app.auth.dependencies import require_verified_user, validate_csrf
@@ -17,6 +22,7 @@ from app.business.service import BusinessDataService
 from app.config import get_settings
 from app.db.models import User
 from app.db.session import get_read_only_db_session
+from app.documents.service import DocumentRetrievalService
 from app.schemas.chat import ChatRequest, ChatResponse, ChatUsage, ToolCallTrace
 
 router = APIRouter()
@@ -36,6 +42,19 @@ def get_llm_client() -> LLMClient | None:
         timeout_seconds=float(settings.LLM_TIMEOUT_SECONDS),
         max_retries=settings.LLM_MAX_RETRIES,
         max_output_tokens=settings.LLM_MAX_OUTPUT_TOKENS,
+    )
+
+
+def get_embedding_client() -> EmbeddingClient:
+    """Provide the configured embedding client (falls back to deterministic in offline tests)."""
+    if not settings.OPENAI_API_KEY:
+        return DeterministicEmbeddingClient(dimensions=settings.EMBEDDING_DIMENSIONS)
+    return OpenAIEmbeddingClient(
+        api_key=settings.OPENAI_API_KEY,
+        model=settings.EMBEDDING_MODEL,
+        dimensions=settings.EMBEDDING_DIMENSIONS,
+        timeout_seconds=float(settings.LLM_TIMEOUT_SECONDS),
+        max_retries=settings.LLM_MAX_RETRIES,
     )
 
 
@@ -66,6 +85,7 @@ async def chat(
     user: User = Depends(require_verified_user),
     db: AsyncSession = Depends(get_read_only_db_session),
     llm: LLMClient | None = Depends(get_llm_client),
+    embedder: EmbeddingClient = Depends(get_embedding_client),
     as_of: date = Depends(get_as_of_date),
 ) -> ChatResponse:
     """Answer a business question using only approved, account-scoped read-only tools."""
@@ -89,15 +109,23 @@ async def chat(
         )
 
     service = BusinessDataService(db, user.account_id, as_of)
+    document_service = DocumentRetrievalService(
+        db,
+        user.account_id,
+        embedder,
+        max_cosine_distance=settings.RAG_MAX_COSINE_DISTANCE,
+    )
     started = time.perf_counter()
     try:
         outcome = await run_chat(
             llm=llm,
             service=service,
+            document_service=document_service,
             message=data.message,
             as_of=as_of,
             max_iterations=settings.LLM_MAX_TOOL_ITERATIONS,
             max_tool_calls=settings.LLM_MAX_TOOL_CALLS,
+            max_input_tokens=settings.LLM_MAX_INPUT_TOKENS_PER_REQUEST,
         )
     except LLMError as exc:
         logger.warning(
@@ -128,9 +156,11 @@ async def chat(
             "account_id": str(user.account_id),
             "status": outcome.status,
             "tools": [t.name for t in outcome.tool_calls],
+            "citations_count": len(outcome.citations),
             "latency_ms": round((time.perf_counter() - started) * 1000),
             "input_tokens": outcome.input_tokens,
             "output_tokens": outcome.output_tokens,
+            "embedding_tokens": document_service.embedding_tokens_used,
             "model": llm.model,
         },
     )
@@ -149,6 +179,7 @@ async def chat(
             )
             for t in outcome.tool_calls
         ],
+        citations=outcome.citations,
         usage=ChatUsage(
             model=llm.model,
             input_tokens=outcome.input_tokens,

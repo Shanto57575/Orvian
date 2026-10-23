@@ -15,6 +15,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   get_customer_summary: 'Customer Account Summary',
   search_customers: 'Customer Search',
   get_monthly_trend: 'Monthly Trend Analysis',
+  search_policy_documents: 'Company Policy Document Search',
 }
 
 export function ToolTraceCard({ trace }: { trace: ToolCallTrace }) {
@@ -40,7 +41,8 @@ export function ToolTraceCard({ trace }: { trace: ToolCallTrace }) {
         ? trace.result.totals
         : []
       const first = totals[0] as
-        { currency?: string; invoiced?: string; collected?: string } | undefined
+        | { currency?: string; invoiced?: string; collected?: string }
+        | undefined
       if (first) {
         return (
           <span className="text-[11px] font-medium text-slate-700">
@@ -91,6 +93,18 @@ export function ToolTraceCard({ trace }: { trace: ToolCallTrace }) {
       return (
         <span className="text-[11px] font-medium text-slate-700">
           {points.length} monthly data points
+        </span>
+      )
+    }
+
+    if (trace.name === 'search_policy_documents') {
+      const returned = Number(trace.result.returned ?? 0)
+      const hasEvidence = Boolean(trace.result.has_evidence)
+      return (
+        <span className="text-[11px] font-medium text-slate-700">
+          {hasEvidence
+            ? `Retrieved ${returned} policy excerpt${returned === 1 ? '' : 's'}`
+            : 'No matching policy excerpts'}
         </span>
       )
     }

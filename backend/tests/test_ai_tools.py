@@ -5,18 +5,22 @@ import json
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.embeddings import DeterministicEmbeddingClient
 from app.ai.tools import (
     MAX_RAW_ARGUMENT_BYTES,
     TOOLS,
     execute_tool,
 )
 from app.business.service import BusinessDataService
+from app.documents.ingestion import ingest_policy_documents
+from app.documents.service import DocumentRetrievalService
 from tests.factories import AS_OF, build_business_fixture
 
 
 @pytest.mark.asyncio
 async def test_tool_registry_specifications() -> None:
-    assert len(TOOLS) == 5
+    assert len(TOOLS) == 6
+    assert "search_policy_documents" in TOOLS
     for name, spec in TOOLS.items():
         assert spec.name == name
         assert len(spec.description) > 10
@@ -116,6 +120,9 @@ async def test_execute_tool_bounds_checking(db_session: AsyncSession) -> None:
 async def test_execute_all_tools_smoke(db_session: AsyncSession) -> None:
     fix = await build_business_fixture(db_session)
     service = BusinessDataService(db_session, fix.account_a, AS_OF)
+    embedder = DeterministicEmbeddingClient()
+    await ingest_policy_documents(db_session, account_id=fix.account_a, embedder=embedder)
+    doc_service = DocumentRetrievalService(db_session, fix.account_a, embedder)
 
     # list_unpaid_invoices
     res_unpaid = await execute_tool(
@@ -148,3 +155,14 @@ async def test_execute_all_tools_smoke(db_session: AsyncSession) -> None:
         json.dumps({"months": 6, "end_month": "2026-10"}),
     )
     assert res_trend.ok is True
+
+    # search_policy_documents
+    res_docs = await execute_tool(
+        service,
+        "search_policy_documents",
+        json.dumps({"query": "standard net payment terms", "category": "payment_terms"}),
+        document_service=doc_service,
+    )
+    assert res_docs.ok is True
+    assert res_docs.result is not None
+    assert res_docs.result["has_evidence"] is True
