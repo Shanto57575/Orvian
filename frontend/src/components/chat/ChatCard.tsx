@@ -18,13 +18,14 @@ import {
 import { chatApi, ChatApiError } from '../../api/chat'
 import { useAuth } from '../../context/useAuth'
 import type { ChatMessageItem } from '../../types/chat'
+import { CitationList } from './CitationList'
 import { ToolTraceCard } from './ToolTraceCard'
 
 const SUGGESTED_QUESTIONS = [
   'What was invoiced revenue and collected cash in September 2026?',
   'Which invoices are currently overdue and by how many days?',
-  'Give me a summary of customer CUST-0001 (invoiced vs collected vs overdue).',
-  'Show 6-month revenue and cash collection trend.',
+  'Which overdue invoices breach company collections policy and what tier applies?',
+  'What are standard net payment terms and credit limits by customer segment?',
 ]
 
 interface ChatCardProps {
@@ -89,6 +90,7 @@ export function ChatCard({ onOpenAuth, onOpenOtp }: ChatCardProps) {
         status: response.status,
         as_of: response.as_of,
         tool_calls: response.tool_calls,
+        citations: response.citations ?? [],
         usage: response.usage,
         correlation_id: response.correlation_id,
         timestamp: new Date().toLocaleTimeString([], {
@@ -213,7 +215,7 @@ export function ChatCard({ onOpenAuth, onOpenOtp }: ChatCardProps) {
               </span>
             </div>
             <p className="text-xs text-slate-500">
-              Read-only PostgreSQL business data assistant &middot;
+              Read-only PostgreSQL + pgvector policy RAG assistant &middot;
               Parameterized tools only
             </p>
           </div>
@@ -247,7 +249,7 @@ export function ChatCard({ onOpenAuth, onOpenOtp }: ChatCardProps) {
                 </p>
                 <p className="mt-0.5 text-blue-800 leading-relaxed">
                   Sign in to query synthetic accounts receivable, invoices,
-                  payments, and customer accounts.
+                  payments, and company policy documents.
                 </p>
               </div>
             </div>
@@ -296,8 +298,9 @@ export function ChatCard({ onOpenAuth, onOpenOtp }: ChatCardProps) {
               Ask Business Questions
             </h3>
             <p className="text-xs text-slate-500 mt-1 max-w-sm leading-relaxed">
-              Orvian answers queries directly from verified customer and invoice
-              database records. No model-generated SQL is ever executed.
+              Orvian answers queries directly from verified customer/invoice
+              database records and cited company policy documents. No
+              model-generated SQL is ever executed.
             </p>
 
             <div className="w-full mt-6 space-y-2 text-left">
@@ -364,13 +367,20 @@ export function ChatCard({ onOpenAuth, onOpenOtp }: ChatCardProps) {
                 {msg.content}
               </div>
 
+              {/* Verified Policy Citations */}
+              {msg.citations && msg.citations.length > 0 && (
+                <CitationList citations={msg.citations} />
+              )}
+
               {/* Tool Execution Drawer */}
               {msg.tool_calls && msg.tool_calls.length > 0 && (
                 <div className="pt-2 border-t border-slate-100 space-y-1.5">
                   <div className="flex items-center gap-1.5 text-[11px] font-medium text-slate-500">
                     <Database className="h-3 w-3" />
                     <span>
-                      Database Queries Executed ({msg.tool_calls.length}):
+                      Database & Policy Queries Executed (
+                      {msg.tool_calls.length}
+                      ):
                     </span>
                   </div>
                   <div className="space-y-1.5">
@@ -426,7 +436,7 @@ export function ChatCard({ onOpenAuth, onOpenOtp }: ChatCardProps) {
             <div className="flex items-center gap-2.5 rounded-2xl bg-white border border-slate-200 p-3.5 text-xs text-slate-600 shadow-xs">
               <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
               <span>
-                Querying read-only business data & synthesizing answer...
+                Querying read-only business data & policy documents...
               </span>
             </div>
           </div>
@@ -474,7 +484,7 @@ export function ChatCard({ onOpenAuth, onOpenOtp }: ChatCardProps) {
                   ? 'Please sign in to ask business questions...'
                   : !isVerified
                     ? 'Email verification required before sending queries...'
-                    : 'Ask about customer balances, invoices, collected revenue... (Enter to send)'
+                    : 'Ask about customer balances, invoices, collected revenue, or company policies... (Enter to send)'
               }
               rows={2}
               maxLength={2000}

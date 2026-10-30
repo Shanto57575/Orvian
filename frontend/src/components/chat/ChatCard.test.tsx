@@ -163,6 +163,74 @@ describe('ChatCard AI Operations Analyst', () => {
     expect(screen.getByText('Query Results:')).toBeInTheDocument()
   })
 
+  it('displays verified policy citations and expands source excerpt on click', async () => {
+    vi.spyOn(chatApi, 'sendMessage').mockResolvedValueOnce({
+      answer:
+        'Invoice INV-A5 is in Tier 4 (90+ days overdue) [DOC-COLLECTIONS#C04].',
+      status: 'ok',
+      as_of: '2026-10-22',
+      correlation_id: 'corr-hybrid-001',
+      tool_calls: [
+        {
+          name: 'search_policy_documents',
+          ok: true,
+          arguments: { query: 'collections tier 4', category: 'collections' },
+          result: { has_evidence: true, returned: 1 },
+        },
+      ],
+      citations: [
+        {
+          citation_id: 'DOC-COLLECTIONS#C04',
+          doc_key: 'DOC-COLLECTIONS',
+          document_title:
+            'Accounts Receivable Collections & Escalation Standard Operating Procedure',
+          category: 'collections',
+          version: 'v1.4',
+          effective_date: '2026-02-01',
+          section_title: 'Section 4: Tier 4 (90+ Days Overdue)',
+          page_number: 2,
+          similarity_score: 0.91,
+          excerpt:
+            'Any open invoice exceeding 90 calendar days overdue is in Severe Delinquency (Tier 4).',
+        },
+      ],
+      usage: { model: 'gpt-4o-mini', input_tokens: 450, output_tokens: 60 },
+    })
+
+    renderWithAuth(<ChatCard onOpenAuth={vi.fn()} onOpenOtp={vi.fn()} />, {
+      user: mockVerifiedUser,
+      isAuthenticated: true,
+      isVerified: true,
+    })
+
+    const textarea = screen.getByPlaceholderText(/Ask about customer balances/i)
+    fireEvent.change(textarea, {
+      target: { value: 'Which overdue invoices violate collections policy?' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /send message/i }))
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/Verified Policy Citations \(1\):/i),
+      ).toBeInTheDocument()
+    })
+
+    expect(screen.getByText('DOC-COLLECTIONS#C04')).toBeInTheDocument()
+    expect(
+      screen.getByText('Company Policy Document Search'),
+    ).toBeInTheDocument()
+
+    // Expand citation card to inspect verifiable source excerpt
+    const citationBtn = screen.getByRole('button', {
+      name: /DOC-COLLECTIONS#C04/i,
+    })
+    fireEvent.click(citationBtn)
+
+    expect(
+      screen.getByText(/Any open invoice exceeding 90 calendar days overdue/i),
+    ).toBeInTheDocument()
+  })
+
   it('submits a suggested question directly when clicked', async () => {
     vi.spyOn(chatApi, 'sendMessage').mockResolvedValueOnce({
       answer: 'Overdue invoices found: 2 invoices totaling USD 463.45.',

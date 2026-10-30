@@ -1,12 +1,13 @@
-# Orvian Business Data Foundation & AI Tool Calling
+# Orvian Business Data Foundation, Document RAG & Hybrid AI Tool Calling
 
 ## Overview
-Day 4 introduces the first working AI Operations Analyst for Orvian:
-- An isolated account/tenant layer separating customer and financial records.
+Orvian provides an AI Operations Analyst combining structured financial records with account-scoped company policy documents:
+- An isolated account/tenant layer separating customer, financial, and policy document records.
 - Deterministic synthetic business data (40 customers, ~480 invoices, ~480 payments).
-- Strongly typed, read-only business services computing revenue, overdue balances, aging buckets, and customer summaries.
-- Strictly defined AI tools that invoke business services with Pydantic validation (zero arbitrary SQL).
-- A protected `/api/v1/chat` endpoint orchestrating OpenAI `gpt-4o-mini` with bounded tool execution and safe fallbacks.
+- Five fictional company policy documents (~20 chunks) stored in Neon PostgreSQL with `pgvector` embeddings (`text-embedding-3-small`, 1536 dimensions).
+- Strongly typed, read-only business and document retrieval services.
+- Six strictly defined AI tools (5 SQL business tools + 1 policy RAG tool) with Pydantic validation and zero arbitrary SQL.
+- A protected `/api/v1/chat` endpoint orchestrating OpenAI `gpt-4o-mini` with bounded tool execution, verified citations, and safe fallbacks.
 
 ## Architecture
 
@@ -20,15 +21,19 @@ User -> /api/v1/chat (FastAPI)
                  |
                  +--> OpenAIChatClient (gpt-4o-mini, temp=0, strict=True)
                  +--> Tool Dispatcher:
-                        - get_revenue_summary
-                        - list_unpaid_invoices
-                        - get_customer_summary
-                        - search_customers
-                        - get_monthly_trend
-                 +--> BusinessDataService:
+                        - get_revenue_summary       (SQL)
+                        - list_unpaid_invoices      (SQL)
+                        - get_customer_summary      (SQL)
+                        - search_customers          (SQL)
+                        - get_monthly_trend         (SQL)
+                        - search_policy_documents   (pgvector RAG)
+                 +--> BusinessDataService & DocumentRetrievalService:
                         - Scoped to user's account_id
                         - Integer cent arithmetic (BigInteger)
-                        - Parameterized SQLAlchemy Core
+                        - Parameterized SQLAlchemy Core + pgvector cosine distance
+                 +--> Citation & Grounding Verifier:
+                        - Strips unverified citation tags
+                        - Blocks ungrounded monetary or record claims
 ```
 
 ## Data Model
@@ -43,22 +48,26 @@ User -> /api/v1/chat (FastAPI)
 - **`payments`**: Applied cash payments (`amount_cents`, `paid_on`, `method`).
   - Constraint: Composite foreign key `FOREIGN KEY(account_id, invoice_id) REFERENCES invoices(account_id, id)`.
   - Checks: `amount_cents > 0`, `method IN ('bank_transfer', 'card', 'ach', 'check')`.
+- **`policy_documents`**: Account-scoped company policy documents (`doc_key`, `title`, `category`, `version`, `effective_date`, `filename`, `checksum_sha256`).
+  - Constraint: `UNIQUE(account_id, doc_key)` and `UNIQUE(account_id, id)`.
+- **`document_chunks`**: Section-level chunks with pgvector embeddings (`chunk_id`, `chunk_index`, `section_title`, `page_number`, `content`, `token_count`, `embedding VECTOR(1536)`).
+  - Constraint: Composite foreign key `FOREIGN KEY(account_id, document_id) REFERENCES policy_documents(account_id, id)` and `HNSW (embedding vector_cosine_ops)` index.
 
-## Synthetic Data Seeding
+## Synthetic Data & Document Seeding
 
-The seed script (`backend/scripts/seed_business_data.py`) provides idempotent, deterministic synthetic data for one fictional business ("Brightline Supply Co."):
-- Uses a fixed seed (default `42`) and anchor date (default `2026-10-15`).
-- Produces identical UUID5 identifiers and row counts across runs.
-- Replaces existing demo rows for that slug without deleting authentication data or other tenants.
-- Demo access is assigned exclusively to an explicitly passed verified user via `--member`.
+1. **Business Data Seed (`backend/scripts/seed_business_data.py`)**:
+   - Uses a fixed seed (default `42`) and anchor date (default `2026-10-15`).
+   - Produces identical UUID5 identifiers and row counts across runs.
+2. **Policy Document Seed (`backend/scripts/seed_documents.py`)**:
+   - Parses the 5 Markdown policy documents in `backend/data/policies/`, chunks by section, generates embeddings, and upserts idempotently using `checksum_sha256`.
 
 ### Seeding Commands (from `backend/`):
 ```bash
-# Dry run verification
-uv run python -m scripts.seed_business_data --dry-run
-
-# Seed and link to a verified user account
+# Seed business records and link to a verified user account
 uv run python -m scripts.seed_business_data --member you@example.com
+
+# Ingest company policy documents into the demo account
+uv run python -m scripts.seed_documents
 ```
 
 ## Approved AI Tools
@@ -70,12 +79,13 @@ uv run python -m scripts.seed_business_data --member you@example.com
 | `get_customer_summary` | Customer lifetime invoiced, collected, outstanding, and overdue amounts | `customer_ref` |
 | `search_customers` | Search customers by name or reference substring | `query` (max 100 chars), `limit` (max 10) |
 | `get_monthly_trend` | Month-by-month invoiced and collected totals | `months` (max 24), `end_month` |
+| `search_policy_documents` | Semantic + lexical search over account-scoped company policy documents | `query` (max 300 chars), `category`, `top_k` (max 8) |
 
 ## Safety & Invariants
 
 1. **No Model SQL**: The model cannot provide SQL queries, table names, or raw filters. Every report is executed through precompiled SQLAlchemy expressions.
-2. **Account Isolation**: `account_id` is supplied exclusively by the authenticated user's session and injected into `BusinessDataService`. AI tool arguments forbid `account_id`.
+2. **Account Isolation**: `account_id` is supplied exclusively by the authenticated user's session and injected into `BusinessDataService` and `DocumentRetrievalService`. AI tool arguments forbid `account_id`.
 3. **Integer Cents**: All money columns and calculations use exact integer cents to eliminate floating-point inaccuracies. Formatted as `Decimal` strings in API outputs.
-4. **Bounded Iterations**: Orchestration caps at `LLM_MAX_TOOL_ITERATIONS=4` and `LLM_MAX_TOOL_CALLS=8`.
-5. **Anti-Hallucination**: If the model proposes an answer containing monetary numbers without executing tools, the response is replaced with a safe refusal.
-6. **Production Protection**: The seed script refuses execution if `ENVIRONMENT=production`.
+4. **Bounded Iterations & Tokens**: Orchestration caps at `LLM_MAX_TOOL_ITERATIONS=5`, `LLM_MAX_TOOL_CALLS=8`, and `LLM_MAX_INPUT_TOKENS_PER_REQUEST=16000`.
+5. **Anti-Hallucination & Citation Verification**: Any answer claiming account-specific monetary figures or invoice/customer IDs without executing SQL tools is replaced with a safe refusal, and any citation tag not present in the turn's retrieved chunks is stripped.
+6. **Production Protection**: Both seed scripts refuse execution if `ENVIRONMENT=production`.
