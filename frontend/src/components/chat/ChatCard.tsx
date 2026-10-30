@@ -378,7 +378,8 @@ export function ChatCard({ onOpenAuth, onOpenOtp }: ChatCardProps) {
                   <div className="flex items-center gap-1.5 text-[11px] font-medium text-slate-500">
                     <Database className="h-3 w-3" />
                     <span>
-                      Database & Policy Queries Executed ({msg.tool_calls.length}
+                      Database & Policy Queries Executed (
+                      {msg.tool_calls.length}
                       ):
                     </span>
                   </div>

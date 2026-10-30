@@ -41,8 +41,7 @@ export function ToolTraceCard({ trace }: { trace: ToolCallTrace }) {
         ? trace.result.totals
         : []
       const first = totals[0] as
-        | { currency?: string; invoiced?: string; collected?: string }
-        | undefined
+        { currency?: string; invoiced?: string; collected?: string } | undefined
       if (first) {
         return (
           <span className="text-[11px] font-medium text-slate-700">

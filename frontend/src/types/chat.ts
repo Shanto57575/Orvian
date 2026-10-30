@@ -31,10 +31,7 @@ export interface ChatUsage {
 }
 
 export type ChatResponseStatus =
-  | 'ok'
-  | 'no_data'
-  | 'limit_reached'
-  | 'ungrounded'
+  'ok' | 'no_data' | 'limit_reached' | 'ungrounded'
 
 export interface ChatResponse {
   answer: string

@@ -2,11 +2,7 @@ import { useState } from 'react'
 import { BookOpen, ChevronDown, ChevronRight, FileText } from 'lucide-react'
 import type { DocumentCitation } from '../../types/chat'
 
-export function CitationList({
-  citations,
-}: {
-  citations: DocumentCitation[]
-}) {
+export function CitationList({ citations }: { citations: DocumentCitation[] }) {
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
   if (!citations || citations.length === 0) {
